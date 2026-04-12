@@ -1,6 +1,7 @@
 package com.mahjong.service;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -306,53 +307,161 @@ public class MahjongGame {
     }
 
     public boolean checkChow(Tile selectedTile, List<Tile> chowTiles, int playerId) {
-        TileType type = selectedTile.getType();
-        int number = selectedTile.getNumber();
+        if (chowTiles == null || chowTiles.size() != 2) {
+            System.out.println("Chow requires exactly 2 tiles from hand.");
+            return false;
+        }
+
+        Tile h1 = chowTiles.get(0);
+        Tile h2 = chowTiles.get(1);
+
+        // All 3 tiles must be the same non-flower suit
+        if (selectedTile.isFlower() || h1.isFlower() || h2.isFlower()) {
+            System.out.println("Chow: flower tiles cannot form a sequence.");
+            return false;
+        }
+        if (selectedTile.getType() != h1.getType() || selectedTile.getType() != h2.getType()) {
+            System.out.println("Chow: tiles are not all the same suit.");
+            return false;
+        }
+
+        // The 3 numbers must form a consecutive run
+        int[] nums = { selectedTile.getNumber(), h1.getNumber(), h2.getNumber() };
+        Arrays.sort(nums);
+        if (nums[1] != nums[0] + 1 || nums[2] != nums[0] + 2) {
+            System.out.println("No Chow found for tile: " + selectedTile);
+            return false;
+        }
+
+        // Valid chow — remove the two hand tiles and build the declared set
         Player player = playerMap.get(playerId);
         List<Tile> playerHand = player.getHand();
+        playerHand.remove(h1);
+        playerHand.remove(h2);
 
-        List<Tile> tilesToChow = new ArrayList<>(chowTiles);
+        List<Tile> chowSet = new ArrayList<>(List.of(selectedTile, h1, h2));
+        player.getFinishedHand().add(chowSet);
 
-        // Check for Chow combinations
-        for (int i = 0; i < chowTiles.size(); i++) {
-            Tile tile1 = chowTiles.get(i);
-            int tile1Number = tile1.getNumber();
-            if (tile1.getType() == type && (Math.abs(tile1.getNumber() - number) == 1
-                    || Math.abs(tile1.getNumber() - number) == 2) && !tile1.equals(selectedTile)) {
-                for (int j = i + 1; j < chowTiles.size(); j++) {
-                    Tile tile2 = chowTiles.get(j);
-                    if (tile2.getType() == type && (Math.abs(tile2.getNumber() - number) == 1 ||
-                            Math.abs(tile2.getNumber() - tile1Number) == 1) && !tile2.equals(selectedTile)
-                            && !tile2.equals(tile1)) {
-                        System.out.println("Chow found with tiles: " + selectedTile + ", " + tile1 + ", " + tile2);
+        discardPile.remove(selectedTile);
 
-                    } else {
-                        tilesToChow.remove(tile2);
-                    }
+        System.out.println("Chow: " + selectedTile + " + " + h1 + " + " + h2);
+        return true;
+    }
+
+    /**
+     * Checks if a player has a winning Mahjong hand:
+     * exactly 1 eye (pair of identical tiles) and 5 bahays
+     * (sequences of 3 consecutive tiles of the same suit),
+     * combining their declared finished sets and current hand.
+     *
+     * Rules:
+     *  - Every set already declared in the finished hand must itself be a valid bahay.
+     *  - The remaining tiles in the current hand must form (5 - finishedBahays) bahays + 1 eye.
+     */
+    public boolean checkBahayMahjong(int playerId) {
+        Player player = playerMap.get(playerId);
+        if (player == null) return false;
+
+        List<List<Tile>> finishedSets = player.getFinishedHand();
+        List<Tile> hand = new ArrayList<>(player.getHand());
+
+        // Every declared set must be a valid bahay; count how many we already have
+        int finishedBahays = 0;
+        for (List<Tile> set : finishedSets) {
+            if (!isValidBahay(set)) {
+                System.out.println("Declared set is not a bahay (consecutive sequence): " + set);
+                return false;
+            }
+            finishedBahays++;
+        }
+
+        if (finishedBahays > 5) {
+            System.out.println("Player " + playerId + " has more than 5 finished bahays — invalid.");
+            return false;
+        }
+
+        int remainingBahays = 5 - finishedBahays;
+        // Current hand must have exactly remainingBahays*3 + 2 tiles (the 2 being the eye)
+        int expectedSize = remainingBahays * 3 + 2;
+        if (hand.size() != expectedSize) {
+            System.out.println("Hand size " + hand.size() + " does not match expected " + expectedSize
+                    + " for " + remainingBahays + " remaining bahays + 1 eye.");
+            return false;
+        }
+
+        // Sort for deterministic greedy processing
+        hand.sort(Comparator.comparing(Tile::getType).thenComparingInt(Tile::getNumber));
+
+        // Try each adjacent pair as the eye
+        for (int i = 0; i < hand.size() - 1; i++) {
+            Tile t1 = hand.get(i);
+            Tile t2 = hand.get(i + 1);
+            if (t1.equals(t2)) {
+                List<Tile> remaining = new ArrayList<>(hand);
+                remaining.remove(i + 1);
+                remaining.remove(i);
+                if (canFormBahays(remaining, remainingBahays)) {
+                    System.out.println("Player " + playerId + " has Mahjong! Eye: " + t1
+                            + ", finished bahays: " + finishedBahays + ", hand bahays: " + remainingBahays);
+                    return true;
                 }
-            } else {
-                tilesToChow.remove(tile1);
+                // Skip duplicate tiles to avoid redundant checks
+                while (i + 1 < hand.size() - 1 && hand.get(i + 1).equals(t1)) i++;
             }
         }
-        if (tilesToChow.size() == 2) {
-            for (Tile t : tilesToChow) {
-                playerHand.remove(t);
-            }
-            tilesToChow.add(selectedTile);
-            // Add to finished hand
-            List<List<Tile>> finishedHand = player.getFinishedHand();
-            finishedHand.add(new ArrayList<>(tilesToChow));
-            player.setFinishedHand(finishedHand);
 
-            // Remove selectedTile from discard pile if present
-            discardPile.remove(selectedTile);
+        System.out.println("Player " + playerId + " does not have a winning hand.");
+        return false;
+    }
 
-            // return player.getFinishedHand();
+    /**
+     * Returns true if a set of tiles is a valid bahay:
+     * exactly 3 tiles of the same suit with consecutive numbers.
+     */
+    private boolean isValidBahay(List<Tile> set) {
+        if (set.size() != 3) return false;
+        List<Tile> sorted = new ArrayList<>(set);
+        sorted.sort(Comparator.comparing(Tile::getType).thenComparingInt(Tile::getNumber));
+        Tile a = sorted.get(0), b = sorted.get(1), c = sorted.get(2);
+        return a.getType() == b.getType()
+                && b.getType() == c.getType()
+                && b.getNumber() == a.getNumber() + 1
+                && c.getNumber() == a.getNumber() + 2;
+    }
 
-            return true;
+    /**
+     * Greedily checks whether the given (sorted) tile list can form exactly {@code count} bahays.
+     * The smallest tile must always start a sequence; if it cannot, the configuration is impossible.
+     */
+    private boolean canFormBahays(List<Tile> tiles, int count) {
+        if (count == 0) return tiles.isEmpty();
+        if (tiles.size() < 3) return false;
+
+        Tile first = tiles.get(0);
+        List<Tile> remaining = new ArrayList<>(tiles);
+        remaining.remove(0);
+
+        int idx2 = indexOfTile(remaining, first.getType(), first.getNumber() + 1);
+        if (idx2 < 0) return false;
+        remaining.remove(idx2);
+
+        int idx3 = indexOfTile(remaining, first.getType(), first.getNumber() + 2);
+        if (idx3 < 0) return false;
+        remaining.remove(idx3);
+
+        return canFormBahays(remaining, count - 1);
+    }
+
+    /**
+     * Returns the index of the first tile in the list matching the given type and number,
+     * or -1 if not found.
+     */
+    private int indexOfTile(List<Tile> tiles, TileType type, int number) {
+        for (int i = 0; i < tiles.size(); i++) {
+            Tile t = tiles.get(i);
+            if (t.getType() == type && t.getNumber() == number) return i;
         }
-        System.out.println("No Chow found for tile: " + selectedTile);
-        return false; // Return empty list if no Chow found
+        return -1;
     }
 
     public boolean checkMahjong(int playerId) {
