@@ -112,6 +112,18 @@ public class GameController {
         return Response.success(gameState);
     }
 
+    @PostMapping("/api/game/kang")
+    public Response<GameStateResponse> kang(
+            @RequestParam("gameId") int gameId,
+            @RequestParam("playerId") int playerId,
+            @RequestBody KangRequest request) {
+        request.setPlayerId(playerId);
+        GameStateResponse gameState = gameService.kang(gameId, request);
+        gameState.setGameId(gameId);
+        return Response.success(gameState);
+        }
+    
+
     @GetMapping("/api/game/checkMahjong")
     public Response<GameStateResponse> checkMahjong(
             @RequestParam("gameId") int gameId,

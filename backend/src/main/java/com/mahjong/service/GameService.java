@@ -4,6 +4,7 @@ import com.mahjong.dao.GameDao;
 import com.mahjong.dto.ChowRequest;
 import com.mahjong.dto.DiscardTileRequest;
 import com.mahjong.dto.GameStateResponse;
+import com.mahjong.dto.KangRequest;
 import com.mahjong.dto.PongRequest;
 import com.mahjong.model.Tile;
 
@@ -253,6 +254,50 @@ public class GameService {
 
         GameStateResponse updatedState = convertToGameStateResponse(mahjongGame);
         updatedState.setValidMove(isValid);
+        gameDao.updateGame(gameId, updatedState);
+        return updatedState;
+    }
+
+    public GameStateResponse kang(int gameId, KangRequest request) {
+        GameStateResponse gameState = gameDao.getGame(gameId);
+        if (gameState == null) throw new RuntimeException("Game not found with ID: " + gameId);
+
+        MahjongGame mahjongGame = reconstructMahjongGame(gameState);
+        int playerId = request.getPlayerId();
+
+        if (!tilesExistInHand(mahjongGame, playerId, request.getTiles())) {
+            GameStateResponse updatedState = convertToGameStateResponse(mahjongGame);
+            updatedState.setValidMove(false);
+            return updatedState;
+        }
+
+        boolean isValid = mahjongGame.checkKang(request.getSelectedTile(), request.getTiles(), playerId);
+        if (!isValid) {
+            GameStateResponse updatedState = convertToGameStateResponse(mahjongGame);
+            updatedState.setValidMove(false);
+            return updatedState;
+        }
+
+        mahjongGame.setCurrentPlayerTurn(playerId);
+
+        // Auto-draw a bonus tile after kang
+        Tile drawn = mahjongGame.drawTileAndReturn(playerId);
+        String message;
+        if (drawn == null) {
+            message = "Kang declared — no tiles left to draw.";
+        } else if (drawn.isFlower()) {
+            message = "Drew a flower (" + drawn.getType() + " " + drawn.getNumber() + ") after kang — exchanging automatically.";
+            List<com.mahjong.model.Tile> hand = mahjongGame.getCurrentPlayerHand(playerId);
+            while (hand.stream().anyMatch(com.mahjong.model.Tile::isFlower)) {
+                mahjongGame.exchangeTiles(playerId);
+            }
+        } else {
+            message = "Drew " + drawn.getType() + " " + drawn.getNumber() + " after kang.";
+        }
+
+        GameStateResponse updatedState = convertToGameStateResponse(mahjongGame);
+        updatedState.setValidMove(true);
+        updatedState.setMessage(message);
         gameDao.updateGame(gameId, updatedState);
         return updatedState;
     }

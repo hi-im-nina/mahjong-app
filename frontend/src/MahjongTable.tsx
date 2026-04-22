@@ -58,6 +58,7 @@ const MahjongTable = () => {
     const [gameId, setGameId] = useState<number>(0);
     const [currentPlayerTurn, setCurrentPlayerTurn] = useState(1);
     const [moves, setMoves] = useState<string[]>([]);
+    const [statusMessage, setStatusMessage] = useState<{ text: string; win: boolean } | null>(null);
 
     // Last discarded tile state
     const [lastDiscardedTile, setLastDiscardedTile] = useState<Tile | null>(null);
@@ -520,6 +521,21 @@ const MahjongTable = () => {
         }
     };
 
+    const handleCheckMahjong = async () => {
+        try {
+            const response = await fetch(`/api/game/checkMahjong?gameId=${gameId}&playerId=1`);
+            const result = await response.json();
+            if (result.data?.isValidMove) {
+                setStatusMessage({ text: '🀄 Mahjong! You win!', win: true });
+            } else {
+                const errMsg = result.errors?.[0] ?? 'Not a winning hand.';
+                setStatusMessage({ text: errMsg, win: false });
+            }
+        } catch (error) {
+            console.error('Error checking mahjong:', error);
+        }
+    };
+
     const handleAdvanceToNextTurn = async () => {
         try {
             const response = await fetch(`api/game/computerTurn?gameId=${gameId}&playerId=${currentPlayerTurn}`);
@@ -607,6 +623,15 @@ const MahjongTable = () => {
                             {lastDiscardTileSelected ? ' ✓ selected' : ' — click it to claim'}
                         </p>
                     )}
+                    {statusMessage && (
+                        <p style={{
+                            fontSize: '0.875rem', fontWeight: 'bold', marginTop: '0.5rem',
+                            color: statusMessage.win ? '#4ade80' : '#f87171',
+                            cursor: 'pointer',
+                        }} onClick={() => setStatusMessage(null)}>
+                            {statusMessage.text}
+                        </p>
+                    )}
                 </section>
                 <section className="history__container">
                     <h2>History</h2>
@@ -690,6 +715,12 @@ const MahjongTable = () => {
                     onMouseLeave={e => { if (lastDiscardTileSelected) e.currentTarget.style.backgroundColor = '#8b5cf6'; }}
                 >
                     Kang
+                </button>
+                <button style={{ ...btnBase, backgroundColor: '#dc2626' }}
+                    onClick={handleCheckMahjong}
+                    onMouseEnter={e => e.currentTarget.style.backgroundColor = '#b91c1c'}
+                    onMouseLeave={e => e.currentTarget.style.backgroundColor = '#dc2626'}>
+                    Mahjong!
                 </button>
                 <button
                     onClick={handleAdvanceToNextTurn}

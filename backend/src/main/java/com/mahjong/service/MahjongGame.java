@@ -104,15 +104,34 @@ public class MahjongGame {
     // Initialize tiles
     public void initializeTiles() {
         for (TileType type : TileType.values()) {
-            int maxNumber = type == TileType.FLOWERS ? 4 : 9; // Simplified flower count
-            for (int i = 1; i <= maxNumber; i++) {
-                for (int j = 0; j < NUM_OF_SET; j++) {
-                    boolean isFlower = (type == TileType.FLOWERS);
-                    tileStack.add(new Tile(type, i, isFlower));
+            switch (type) {
+                case BALLS, CHARS, STICKS -> {
+                    // 9 values × 4 copies = 36 each
+                    for (int i = 1; i <= 9; i++)
+                        for (int j = 0; j < NUM_OF_SET; j++)
+                            tileStack.add(new Tile(type, i, false));
+                }
+                case WINDS -> {
+                    // 4 winds (East=1, South=2, West=3, North=4) × 4 copies = 16
+                    // Treated as flowers in Filipino Mahjong — exchanged when drawn
+                    for (int i = 1; i <= 4; i++)
+                        for (int j = 0; j < NUM_OF_SET; j++)
+                            tileStack.add(new Tile(type, i, true));
+                }
+                case DRAGONS -> {
+                    // 3 dragons (Red=1, Green=2, White=3) × 4 copies = 12
+                    // Treated as flowers in Filipino Mahjong — exchanged when drawn
+                    for (int i = 1; i <= 3; i++)
+                        for (int j = 0; j < NUM_OF_SET; j++)
+                            tileStack.add(new Tile(type, i, true));
+                }
+                case FLOWERS -> {
+                    // 8 unique flower/season tiles × 1 copy each = 8
+                    for (int i = 1; i <= 8; i++)
+                        tileStack.add(new Tile(type, i, true));
                 }
             }
         }
-        // Shuffle tiles
         Collections.shuffle(tileStack);
     }
 
@@ -315,9 +334,9 @@ public class MahjongGame {
         Tile h1 = chowTiles.get(0);
         Tile h2 = chowTiles.get(1);
 
-        // All 3 tiles must be the same non-flower suit
-        if (selectedTile.isFlower() || h1.isFlower() || h2.isFlower()) {
-            System.out.println("Chow: flower tiles cannot form a sequence.");
+        // All 3 tiles must be suited (BALLS, CHARS, STICKS) — no honor or flower tiles
+        if (!isSuited(selectedTile) || !isSuited(h1) || !isSuited(h2)) {
+            System.out.println("Chow: only suited tiles (balls/chars/sticks) can form a sequence.");
             return false;
         }
         if (selectedTile.getType() != h1.getType() || selectedTile.getType() != h2.getType()) {
@@ -560,6 +579,64 @@ public class MahjongGame {
         return false;
     }
 
+    public boolean checkKang(Tile selectedTile, List<Tile> kangTiles, int playerId) {
+        if (kangTiles == null || kangTiles.size() != 3) {
+            System.out.println("Kang requires exactly 3 tiles from hand.");
+            return false;
+        }
+
+        TileType type = selectedTile.getType();
+        int number = selectedTile.getNumber();
+        Player player = playerMap.get(playerId);
+        if (player == null) {
+            System.out.println("Player " + playerId + " not found.");
+            return false;
+        }
+
+        List<Tile> playerHand = player.getHand();
+
+        // All 3 hand tiles must be in the player's hand
+        for (Tile tile : kangTiles) {
+            if (!playerHand.contains(tile)) {
+                System.out.println("Tile " + tile + " not found in player's hand.");
+                return false;
+            }
+        }
+
+        // All 3 hand tiles must match the selected tile
+        for (Tile tile : kangTiles) {
+            if (tile.getType() != type || tile.getNumber() != number) {
+                System.out.println("Kang tiles do not all match selected tile " + selectedTile);
+                return false;
+            }
+        }
+
+        // Remove the 3 hand tiles
+        for (Tile t : kangTiles) {
+            playerHand.remove(t);
+        }
+
+        // Build the 4-tile kang set and add to finished hand
+        List<Tile> kangSet = new ArrayList<>(kangTiles);
+        kangSet.add(selectedTile);
+        player.getFinishedHand().add(kangSet);
+
+        // Remove selectedTile from discard pile if present
+        discardPile.remove(selectedTile);
+
+        System.out.println("Kang declared by player " + playerId + ": " + kangSet);
+        return true;
+    }
+
+    public Tile drawTileAndReturn(int playerId) {
+        Player player = playerMap.get(playerId);
+        if (player == null || tileStack.isEmpty()) return null;
+        Tile drawn = tileStack.remove(0);
+        player.addTile(drawn);
+        System.out.println("Player " + playerId + " drew tile after kang: " + drawn);
+        return drawn;
+    }
+
     public void discardTile(int playerId, TileType type, int number) {
 
         if (!isPlayerTurn(playerId)) {
@@ -603,7 +680,6 @@ public class MahjongGame {
 
         if (currentPlayerTurn == 1) {
             throw new IllegalArgumentException("It is Player 1 (main player)'s turn.");
-
         }
 
         System.out.println("Computer player " + playerId + " taking turn");
@@ -611,21 +687,81 @@ public class MahjongGame {
         // 1. Draw a tile
         drawTile(currentPlayerTurn);
 
-        List<Tile> currentPlayerHand = getCurrentPlayerHand(playerId);
-
-        // if the most recently drawn tile is a flower, discard it immediately
-        Tile lastTile = currentPlayerHand.getLast();
-        if (lastTile.isFlower()) {
-            exchangeSingleFlower(currentPlayerTurn, lastTile);
+        // 2. Exchange all flowers — loop in case a replacement is also a flower
+        List<Tile> hand = getCurrentPlayerHand(playerId);
+        while (hand.stream().anyMatch(Tile::isFlower)) {
+            exchangeTiles(currentPlayerTurn);
         }
 
-        List<Tile> hand = getCurrentPlayerHand(currentPlayerTurn);
+        // 3. Check win condition — declare mahjong if possible
+        if (checkBahayMahjong(playerId)) {
+            winnerId = playerId;
+            System.out.println("Computer player " + playerId + " wins!");
+            return;
+        }
 
+        // 4. Smart discard: keep tiles that contribute to sequences
+        hand = getCurrentPlayerHand(currentPlayerTurn);
         if (!hand.isEmpty()) {
-            Tile tileToDiscard = hand.get(hand.size() - 1);
+            Tile tileToDiscard = chooseTileToDiscard(hand);
             discardTile(currentPlayerTurn, tileToDiscard.getType(), tileToDiscard.getNumber());
         }
+    }
 
+    private Tile chooseTileToDiscard(List<Tile> hand) {
+        Tile worst = null;
+        int lowestScore = Integer.MAX_VALUE;
+
+        for (Tile tile : hand) {
+            if (tile.isFlower()) continue;
+            int score = scoreTileForKeeping(tile, hand);
+            if (score < lowestScore) {
+                lowestScore = score;
+                worst = tile;
+            }
+        }
+        return worst != null ? worst : hand.get(hand.size() - 1);
+    }
+
+    private int scoreTileForKeeping(Tile tile, List<Tile> hand) {
+        if (tile.isFlower()) return -100;
+
+        int score = 0;
+        int v = tile.getNumber();
+        TileType t = tile.getType();
+
+        if (isSuited(tile)) {
+            // Complete sequences this tile participates in
+            if (countInHand(hand, v - 2, t) >= 1 && countInHand(hand, v - 1, t) >= 1) score += 6;
+            if (countInHand(hand, v - 1, t) >= 1 && countInHand(hand, v + 1, t) >= 1) score += 6;
+            if (countInHand(hand, v + 1, t) >= 1 && countInHand(hand, v + 2, t) >= 1) score += 6;
+
+            // Partial sequences (two adjacent tiles toward a bahay)
+            if (countInHand(hand, v + 1, t) >= 1 || countInHand(hand, v - 1, t) >= 1) score += 2;
+            if (countInHand(hand, v + 2, t) >= 1 || countInHand(hand, v - 2, t) >= 1) score += 1;
+
+            // Edge tile penalty — 1s and 9s can only extend in one direction
+            if (v == 1 || v == 9) score -= 3;
+        }
+
+        // Pair/triple bonus applies to all types (useful as the eye or pong)
+        long countInHandLong = hand.stream().filter(t2 -> t2.equals(tile)).count();
+        if (countInHandLong >= 2) score += 5;
+
+        return score;
+    }
+
+    private int countInHand(List<Tile> hand, int number, TileType type) {
+        int count = 0;
+        for (Tile t : hand) {
+            if (t.getNumber() == number && t.getType() == type) count++;
+        }
+        return count;
+    }
+
+    private boolean isSuited(Tile tile) {
+        TileType t = tile.getType();
+        return t == TileType.BALLS || t == TileType.CHARS || t == TileType.STICKS;
     }
 
     /**
