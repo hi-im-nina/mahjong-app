@@ -21,6 +21,7 @@ public class GameStateResponse {
     private List<String> moves;
     private boolean canDraw;
     private boolean canDiscard;
+    private String message;
 
     public GameStateResponse() {
         this.currentPlayerHand = new ArrayList<>();
@@ -133,5 +134,13 @@ public class GameStateResponse {
 
     public void setCanDiscard(boolean canDiscard) {
         this.canDiscard = canDiscard;
+    }
+
+    public String getMessage() {
+        return message;
+    }
+
+    public void setMessage(String message) {
+        this.message = message;
     }
 }

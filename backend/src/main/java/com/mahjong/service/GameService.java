@@ -1,8 +1,11 @@
 package com.mahjong.service;
 
 import com.mahjong.dao.GameDao;
+import com.mahjong.dto.ChowRequest;
 import com.mahjong.dto.DiscardTileRequest;
 import com.mahjong.dto.GameStateResponse;
+import com.mahjong.dto.KangRequest;
+import com.mahjong.dto.PongRequest;
 import com.mahjong.model.Tile;
 
 import java.util.ArrayList;
@@ -184,9 +187,162 @@ public class GameService {
         return updatedState;
     }
 
+    public int createTestGame() {
+        MahjongGame mahjongGame = new MahjongGame();
+        mahjongGame.initializeTiles();
+        mahjongGame.dealSameTilesToAllPlayers();
+        System.out.println("Created a new test Mahjong game.");
+        GameStateResponse gameState = convertToGameStateResponse(mahjongGame);
+        gameState.setCurrentPlayerTurn(1);
+        gameState.setWinnerId(-1);
+        return gameDao.createGame(gameState);
+    }
+
+    /**
+     * Checks whether player 1 has a winning bahay Mahjong hand (1 eye + 5 bahays).
+     * Considers both the player's current hand and their declared finished sets.
+     * If the hand is valid, the winner is recorded and the game state is persisted.
+     */
+    public GameStateResponse checkBahayMahjong(int gameId, int playerId) {
+        GameStateResponse gameState = gameDao.getGame(gameId);
+        if (gameState == null) throw new RuntimeException("Game not found with ID: " + gameId);
+
+        MahjongGame mahjongGame = reconstructMahjongGame(gameState);
+        boolean isMahjong = mahjongGame.checkBahayMahjong(playerId);
+
+        if (isMahjong) {
+            mahjongGame.setWinnerId(playerId);
+        }
+
+        GameStateResponse updatedState = convertToGameStateResponse(mahjongGame);
+        updatedState.setValidMove(isMahjong);
+
+        if (isMahjong) {
+            gameDao.updateGame(gameId, updatedState);
+        }
+
+        return updatedState;
+    }
+
+    public GameStateResponse mahjong(int gameId, int playerId) {
+        GameStateResponse gameState = gameDao.getGame(gameId);
+        if (gameState == null) throw new RuntimeException("Game not found with ID: " + gameId);
+        MahjongGame mahjongGame = reconstructMahjongGame(gameState);
+        boolean isValid = mahjongGame.checkMahjong(playerId);
+        if (isValid) mahjongGame.setWinnerId(playerId);
+        GameStateResponse updatedState = convertToGameStateResponse(mahjongGame);
+        updatedState.setValidMove(isValid);
+        gameDao.updateGame(gameId, updatedState);
+        return updatedState;
+    }
+
+    public GameStateResponse pong(int gameId, PongRequest request) {
+        GameStateResponse gameState = gameDao.getGame(gameId);
+        if (gameState == null) throw new RuntimeException("Game not found with ID: " + gameId);
+
+        MahjongGame mahjongGame = reconstructMahjongGame(gameState);
+        int playerId = request.getPlayerId();
+
+        if (!tilesExistInHand(mahjongGame, playerId, request.getTiles())) {
+            GameStateResponse updatedState = convertToGameStateResponse(mahjongGame);
+            updatedState.setValidMove(false);
+            return updatedState;
+        }
+
+        boolean isValid = mahjongGame.checkPong(request.getSelectedTile(), request.getTiles(), playerId);
+        if (isValid) mahjongGame.setCurrentPlayerTurn(playerId);
+
+        GameStateResponse updatedState = convertToGameStateResponse(mahjongGame);
+        updatedState.setValidMove(isValid);
+        gameDao.updateGame(gameId, updatedState);
+        return updatedState;
+    }
+
+    public GameStateResponse kang(int gameId, KangRequest request) {
+        GameStateResponse gameState = gameDao.getGame(gameId);
+        if (gameState == null) throw new RuntimeException("Game not found with ID: " + gameId);
+
+        MahjongGame mahjongGame = reconstructMahjongGame(gameState);
+        int playerId = request.getPlayerId();
+
+        if (!tilesExistInHand(mahjongGame, playerId, request.getTiles())) {
+            GameStateResponse updatedState = convertToGameStateResponse(mahjongGame);
+            updatedState.setValidMove(false);
+            return updatedState;
+        }
+
+        boolean isValid = mahjongGame.checkKang(request.getSelectedTile(), request.getTiles(), playerId);
+        if (!isValid) {
+            GameStateResponse updatedState = convertToGameStateResponse(mahjongGame);
+            updatedState.setValidMove(false);
+            return updatedState;
+        }
+
+        mahjongGame.setCurrentPlayerTurn(playerId);
+
+        // Auto-draw a bonus tile after kang
+        Tile drawn = mahjongGame.drawTileAndReturn(playerId);
+        String message;
+        if (drawn == null) {
+            message = "Kang declared — no tiles left to draw.";
+        } else if (drawn.isFlower()) {
+            message = "Drew a flower (" + drawn.getType() + " " + drawn.getNumber() + ") after kang — exchanging automatically.";
+            List<com.mahjong.model.Tile> hand = mahjongGame.getCurrentPlayerHand(playerId);
+            while (hand.stream().anyMatch(com.mahjong.model.Tile::isFlower)) {
+                mahjongGame.exchangeTiles(playerId);
+            }
+        } else {
+            message = "Drew " + drawn.getType() + " " + drawn.getNumber() + " after kang.";
+        }
+
+        GameStateResponse updatedState = convertToGameStateResponse(mahjongGame);
+        updatedState.setValidMove(true);
+        updatedState.setMessage(message);
+        gameDao.updateGame(gameId, updatedState);
+        return updatedState;
+    }
+
+    public GameStateResponse chow(int gameId, ChowRequest request) {
+        GameStateResponse gameState = gameDao.getGame(gameId);
+        if (gameState == null) throw new RuntimeException("Game not found with ID: " + gameId);
+
+        MahjongGame mahjongGame = reconstructMahjongGame(gameState);
+        int playerId = request.getPlayerId();
+
+        // Chow can only be claimed by the player whose turn it is —
+        // i.e. the player immediately after the one who just discarded.
+        if (playerId != mahjongGame.getCurrentPlayerTurn()) {
+            GameStateResponse updatedState = convertToGameStateResponse(mahjongGame);
+            updatedState.setValidMove(false);
+            return updatedState;
+        }
+
+        if (!tilesExistInHand(mahjongGame, playerId, request.getTiles())) {
+            GameStateResponse updatedState = convertToGameStateResponse(mahjongGame);
+            updatedState.setValidMove(false);
+            return updatedState;
+        }
+
+        boolean isValid = mahjongGame.checkChow(request.getSelectedTile(), request.getTiles(), playerId);
+        if (isValid) mahjongGame.setCurrentPlayerTurn(playerId);
+
+        GameStateResponse updatedState = convertToGameStateResponse(mahjongGame);
+        updatedState.setValidMove(isValid);
+        gameDao.updateGame(gameId, updatedState);
+        return updatedState;
+    }
+
+    private boolean tilesExistInHand(MahjongGame game, int playerId, List<Tile> tiles) {
+        List<Tile> hand = game.getCurrentPlayerHand(playerId);
+        for (Tile tile : tiles) {
+            if (!hand.contains(tile)) return false;
+        }
+        return true;
+    }
+
     /**
      * Reconstructs MahjongGame from GameStateResponse
-     * 
+     *
      */
     private MahjongGame reconstructMahjongGame(GameStateResponse state) {
         MahjongGame game = new MahjongGame();

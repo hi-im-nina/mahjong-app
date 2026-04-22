@@ -1,11 +1,7 @@
 package com.mahjong.controller;
 
-import com.mahjong.service.*;
-import com.mahjong.model.Tile;
+import com.mahjong.service.GameService;
 import com.mahjong.dto.*;
-
-import java.util.ArrayList;
-import java.util.List;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -27,36 +23,6 @@ public class GameController {
         return response;
     }
 
-    private MahjongGame mahjongGame;
-
-    private MahjongGame getGame() {
-        if (mahjongGame == null) {
-            mahjongGame = new MahjongGame();
-            mahjongGame.initializeTiles();
-            mahjongGame.dealTiles();
-            System.out.println("Created a new Mahjong game in the getGame method.");
-        }
-        return mahjongGame;
-    }
-
-    private GameStateResponse getCurrentGameState() {
-        GameStateResponse gameStateResponse = new GameStateResponse();
-        MahjongGame game = getGame();
-
-        gameStateResponse.setCurrentPlayerHand(game.getCurrentPlayerHand(1));
-        List<List<Tile>> opponentHands = new ArrayList<>();
-        opponentHands.add(game.getCurrentPlayerHand(2));
-        opponentHands.add(game.getCurrentPlayerHand(3));
-        opponentHands.add(game.getCurrentPlayerHand(4));
-        gameStateResponse.setOpponentHands(opponentHands);
-
-        gameStateResponse.setDiscardedTiles(game.getDiscardedTiles());
-        gameStateResponse.setCurrentPlayerTurn(game.getCurrentPlayerTurn());
-        gameStateResponse.setYourTurn(game.isPlayerTurn(1));
-        gameStateResponse.setCurrentPlayerFinishedHand(game.getCurrentPlayerFinishedHand(1));
-        gameStateResponse.setWinnerId(game.getWinnerId());
-        return gameStateResponse;
-    }
 
     @GetMapping("/api/game/new")
     public Response<GameStateResponse> newGame() {
@@ -79,13 +45,14 @@ public class GameController {
 
     @GetMapping("/api/game/newTestGame")
     public Response<GameStateResponse> newTestGame() {
-        mahjongGame = new MahjongGame();
-        mahjongGame.initializeTiles();
-        mahjongGame.dealSameTilesToAllPlayers();
-        System.out.println("Created a new Mahjong game in the endpoint.");
-
-        GameStateResponse gameStateResponse = getCurrentGameState();
-        return Response.success(gameStateResponse);
+        try {
+            int gameId = gameService.createTestGame();
+            GameStateResponse gameState = gameService.getGameState(gameId);
+            gameState.setGameId(gameId);
+            return Response.success(gameState);
+        } catch (Exception e) {
+            return Response.error("Failed to create test game: " + e.getMessage());
+        }
     }
 
     @PostMapping("/api/game/exchangeFlowers")
@@ -124,87 +91,67 @@ public class GameController {
     }
 
     @PostMapping("/api/game/chow")
-    public Response<GameStateResponse> chow(@RequestBody ChowRequest request) {
-        int playerId = request.getPlayerId();
-        MahjongGame game = getGame();
-
-        // Check if request.tiles exist in player's hand
-        boolean doesRequestTilesExistInPlayerHand = requestTilesExistInPlayerHand(game, playerId, request.getTiles());
-
-        if (!doesRequestTilesExistInPlayerHand) {
-
-            GameStateResponse gameStateResponse = getCurrentGameState();
-            Response<GameStateResponse> response = new Response<>();
-            gameStateResponse.setValidMove(false);
-
-            response.setData(gameStateResponse);
-            response.addError("Invalid move: tiles not in hand");
-            return response;
-        }
-
-        boolean isValidChow = game.checkChow(request.getSelectedTile(), request.getTiles(), playerId);
-        if (isValidChow) {
-            game.setCurrentPlayerTurn(playerId);
-        }
-        GameStateResponse gameStateResponse = getCurrentGameState();
-        gameStateResponse.setValidMove(isValidChow);
-        return Response.success(gameStateResponse);
-
+    public Response<GameStateResponse> chow(
+            @RequestParam("gameId") int gameId,
+            @RequestParam("playerId") int playerId,
+            @RequestBody ChowRequest request) {
+        request.setPlayerId(playerId);
+        GameStateResponse gameState = gameService.chow(gameId, request);
+        gameState.setGameId(gameId);
+        return Response.success(gameState);
     }
 
     @PostMapping("/api/game/pong")
-    public Response<GameStateResponse> pong(@RequestBody PongRequest request) {
-        int playerId = request.getPlayerId();
-        MahjongGame game = getGame();
-        GameStateResponse gameStateResponse = getCurrentGameState();
-        Response<GameStateResponse> response = new Response<>();
+    public Response<GameStateResponse> pong(
+            @RequestParam("gameId") int gameId,
+            @RequestParam("playerId") int playerId,
+            @RequestBody PongRequest request) {
+        request.setPlayerId(playerId);
+        GameStateResponse gameState = gameService.pong(gameId, request);
+        gameState.setGameId(gameId);
+        return Response.success(gameState);
+    }
 
-        // Check if request.tiles exist in player's hand
-        boolean doesRequestTilesExistInPlayerHand = requestTilesExistInPlayerHand(game, playerId, request.getTiles());
+    @PostMapping("/api/game/kang")
+    public Response<GameStateResponse> kang(
+            @RequestParam("gameId") int gameId,
+            @RequestParam("playerId") int playerId,
+            @RequestBody KangRequest request) {
+        request.setPlayerId(playerId);
+        GameStateResponse gameState = gameService.kang(gameId, request);
+        gameState.setGameId(gameId);
+        return Response.success(gameState);
+        }
+    
 
-        if (!doesRequestTilesExistInPlayerHand) {
-
-            gameStateResponse.setValidMove(false);
-            response.setData(gameStateResponse);
-            response.addError("Invalid move: tiles not in hand");
+    @GetMapping("/api/game/checkMahjong")
+    public Response<GameStateResponse> checkMahjong(
+            @RequestParam("gameId") int gameId,
+            @RequestParam("playerId") int playerId) {
+        GameStateResponse gameState = gameService.checkBahayMahjong(gameId, playerId);
+        gameState.setGameId(gameId);
+        if (!gameState.isValidMove()) {
+            Response<GameStateResponse> response = new Response<>();
+            response.setData(gameState);
+            response.addError("Not a winning hand: need 1 eye and 5 bahays (consecutive sequences of the same suit)");
             return response;
         }
-
-        boolean isValidPong = game.checkPong(request.getSelectedTile(), request.getTiles(), playerId);
-
-        if (isValidPong) {
-            gameStateResponse.setCurrentPlayerTurn(playerId);
-        }
-        gameStateResponse.setValidMove(isValidPong);
-        response.setData(gameStateResponse);
-        return response;
-
+        return Response.success(gameState);
     }
 
     @PostMapping("/api/game/mahjong")
-    public Response<GameStateResponse> mahjong(@RequestBody PongRequest request) {
-        int playerId = request.getPlayerId();
-        MahjongGame game = getGame();
-
-        boolean isValidMahjong = game.checkMahjong(playerId);
-
-        if (isValidMahjong) {
-            game.setWinnerId(playerId);
-            GameStateResponse gameStateResponse = new GameStateResponse();
-            gameStateResponse.setValidMove(isValidMahjong);
+    public Response<GameStateResponse> mahjong(
+            @RequestParam("gameId") int gameId,
+            @RequestParam("playerId") int playerId) {
+        GameStateResponse gameState = gameService.mahjong(gameId, playerId);
+        gameState.setGameId(gameId);
+        if (!gameState.isValidMove()) {
             Response<GameStateResponse> response = new Response<>();
-            response.setData(getCurrentGameState());
-            return response;
-        } else {
-            GameStateResponse gameStateResponse = getCurrentGameState();
-            Response<GameStateResponse> response = new Response<>();
-            gameStateResponse.setValidMove(isValidMahjong);
-            response.setData(gameStateResponse);
+            response.setData(gameState);
             response.addError("Invalid move: cannot declare Mahjong now");
             return response;
-
         }
-
+        return Response.success(gameState);
     }
 
     @GetMapping("/api/game/computerTurn")
@@ -215,15 +162,4 @@ public class GameController {
 
     }
 
-    private boolean requestTilesExistInPlayerHand(MahjongGame game, int playerId, List<Tile> requestTiles) {
-        List<Tile> hand = game.getCurrentPlayerHand(playerId);
-
-        for (Tile tile : requestTiles) {
-            if (!hand.contains(tile)) {
-
-                return false;
-            }
-        }
-        return true;
-    }
 }
