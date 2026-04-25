@@ -10,6 +10,8 @@ import java.util.Map;
 
 import com.mahjong.model.Tile;
 import com.mahjong.model.Player;
+import com.mahjong.util.GamePhase;
+import com.mahjong.util.PlayerAction;
 import com.mahjong.util.TileType;
 
 public class MahjongGame {
@@ -24,6 +26,8 @@ public class MahjongGame {
     private int winnerId = -1; // -1 means no winner yet
 
     private ArrayList<String> moves = new ArrayList<String>();
+
+    private GamePhase gamePhase = null;
 
     private boolean canDraw;
     private boolean canDiscard;
@@ -44,6 +48,31 @@ public class MahjongGame {
         this.winnerId = winnerId;
     }
 
+    public void setGamePhase(GamePhase gamePhase) {
+        this.gamePhase = gamePhase;
+    }
+
+    public GamePhase getGamePhase() {
+        return gamePhase;
+    }
+
+    public List<PlayerAction> getValidActions(int playerId) {
+        List<PlayerAction> validActions = new ArrayList<>();
+        if (getGamePhase() == GamePhase.AWAITING_DISCARD && getCurrentPlayerTurn() == playerId) {
+            Collections.addAll(validActions,PlayerAction.DISCARD_TILE, PlayerAction.DECLARE_MAHJONG);
+        }
+
+        if (getGamePhase() == GamePhase.AWAITING_CLAIM && getCurrentPlayerTurn() == playerId) {
+            Collections.addAll(validActions,PlayerAction.PONG, PlayerAction.KANG, PlayerAction.DRAW_TILE, PlayerAction.CHOW);
+        }
+
+         if (getGamePhase() == GamePhase.POST_KANG_DRAW && getCurrentPlayerTurn() == playerId) {
+            Collections.addAll(validActions,PlayerAction.DISCARD_TILE, PlayerAction.DECLARE_MAHJONG);
+        }
+
+        return validActions;
+    }
+
     public boolean isPlayerTurn(int playerId) {
         return currentPlayerTurn == playerId;
     }
@@ -51,6 +80,7 @@ public class MahjongGame {
     public void advanceToNextTurn() {
         currentPlayerTurn = (currentPlayerTurn % numPlayers) + 1;
         System.out.println("Advanced to player " + currentPlayerTurn + "'s turn");
+        setCurrentPlayerTurn(currentPlayerTurn);
     }
 
     public List<Tile> getDiscardedTiles() {
@@ -143,6 +173,12 @@ public class MahjongGame {
                 // Draw from the top
                 Tile tile = tileStack.remove(0);
                 player.addTile(tile);
+
+                // Always make player 1 the mano (starts with 17 tiles)
+                if (getCurrentPlayerHand(1).size() == 16) {
+                    Tile manoTile = tileStack.remove(0);
+                    player.addTile(manoTile);
+                }
             }
         }
 
@@ -155,6 +191,7 @@ public class MahjongGame {
         // Set the tile stack
         System.out.println("Tiles remaining in stack: " + tileStack.size());
         game.setTileStack(tileStack);
+        game.setGamePhase(GamePhase.AWAITING_DISCARD);
     }
 
     /**
@@ -318,8 +355,7 @@ public class MahjongGame {
             Tile drawnTile = tileStack.remove(0);
             player.addTile(drawnTile);
             System.out.println("Player " + playerId + " drew tile: " + drawnTile);
-            setCanDraw(false);
-            setCanDiscard(true);
+            setGamePhase(GamePhase.AWAITING_DISCARD);
         } else {
             System.out.println("No tiles left to draw or player not found.");
         }
@@ -634,6 +670,7 @@ public class MahjongGame {
         Tile drawn = tileStack.remove(0);
         player.addTile(drawn);
         System.out.println("Player " + playerId + " drew tile after kang: " + drawn);
+        setGamePhase(GamePhase.AWAITING_DISCARD);
         return drawn;
     }
 
@@ -664,6 +701,7 @@ public class MahjongGame {
 
                 setCanDiscard(false);
                 setCanDraw(true);
+                setGamePhase(GamePhase.AWAITING_CLAIM);
 
                 advanceToNextTurn();
                 return;

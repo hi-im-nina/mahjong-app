@@ -381,6 +381,9 @@ public class GameService {
         opponentHands.add(game.getCurrentPlayerHand(4));
         response.setOpponentHands(opponentHands);
 
+        response.setGamePhase(game.getGamePhase());
+        response.setValidActions(game.getValidActions(1));
+
         response.setMoves(game.getMoves());
         response.setTileStack(game.getTileStack());
         response.setDiscardedTiles(game.getDiscardedTiles());

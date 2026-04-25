@@ -1,6 +1,8 @@
 package com.mahjong.dto;
 
 import com.mahjong.model.Tile;
+import com.mahjong.util.GamePhase;
+import com.mahjong.util.PlayerAction;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -10,6 +12,8 @@ public class GameStateResponse {
     private List<Tile> currentPlayerHand;
     private List<List<Tile>> opponentHands;
     private List<Tile> discardedTiles;
+    private GamePhase gamePhase;
+    private List<PlayerAction> validActions;
 
     private List<Tile> tileStack;
     private int currentPlayerTurn;
@@ -24,6 +28,8 @@ public class GameStateResponse {
     private String message;
 
     public GameStateResponse() {
+        this.gamePhase = null;
+        this.validActions = new ArrayList<>();
         this.currentPlayerHand = new ArrayList<>();
         this.opponentHands = new ArrayList<>();
         this.discardedTiles = new ArrayList<>();
@@ -46,6 +52,22 @@ public class GameStateResponse {
 
     public void setGameId(int gameId) {
         this.gameId = gameId;
+    }
+
+    public void setGamePhase(GamePhase gamePhase) {
+        this.gamePhase = gamePhase;
+    }
+
+    public GamePhase getGamePhase() {
+        return gamePhase;
+    }
+
+    public void setValidActions(List<PlayerAction> validActions) {
+        this.validActions = validActions;
+    }
+
+    public List<PlayerAction> getValidActions() {
+        return validActions;
     }
 
     public List<Tile> getCurrentPlayerHand() {
